@@ -1,106 +1,658 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-<title>Excel Dashboard</title>
+<meta charset="utf-8" />
+<title>Adaptive Excel Dashboard — Choose numeric metric</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<!-- SheetJS and Chart.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
 <style>
- body { font-family: Arial; padding:20px; background:#f4f4f4; }
- .box { background:white; padding:20px; border-radius:10px; width:90%; margin:auto; }
- select,input { padding:10px; margin:10px; }
- .summary{ background:#eef; padding:10px; margin-top:10px; }
+  :root{
+    --bg:#f4f6f8; --card:#fff; --text:#0f1724; --muted:#6b7280; --accent:#2563eb;
+    --card-shadow: 0 8px 30px rgba(15,23,36,0.06);
+  }
+  .dark{
+    --bg: #071021; --card: #07182a; --text: #e6eef8; --muted:#9aa5b6; --accent:#60a5fa;
+    --card-shadow: 0 8px 30px rgba(2,6,23,0.6);
+  }
+  *{box-sizing:border-box}
+  body{font-family:Inter,system-ui,Arial;margin:0;background:var(--bg);color:var(--text)}
+  .wrap{max-width:1200px;margin:28px auto;padding:18px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+  h1{font-size:20px;margin:0}
+  .card{background:var(--card);border-radius:12px;padding:14px;box-shadow:var(--card-shadow)}
+  .u-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  select,input,button{padding:8px;border-radius:8px;border:1px solid #d1d5db;background:transparent;color:var(--text)}
+  .grid{display:grid;grid-template-columns:1fr 380px;gap:16px;margin-top:12px}
+  #chartBox{height:420px;display:flex;flex-direction:column;gap:10px}
+  canvas{max-height:340px}
+  .statBox{padding:10px;border-radius:8px;background:linear-gradient(180deg, rgba(37,99,235,0.06), rgba(37,99,235,0.02));color:var(--text)}
+  .listPreview{max-height:240px;overflow:auto;border-radius:8px;padding:6px}
+  .small{font-size:13px;color:var(--muted)}
+  .btn{background:var(--accent);color:white;border:none;padding:8px 10px;border-radius:8px;cursor:pointer}
+  .btn.ghost{background:transparent;border:1px solid rgba(0,0,0,0.06);color:var(--text)}
+  .row-spread{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  @media (max-width:860px){ .grid{grid-template-columns:1fr} }
 </style>
 </head>
 <body>
+  <div class="wrap" id="app">
+    <header>
+      <div>
+        <h1>Adaptive Excel Dashboard</h1>
+        <div class="small">Upload Excel files, choose sheet; pick numeric metric to plot. Fully client-side.</div>
+      </div>
+      <div class="u-row">
+        <label class="small"><input type="checkbox" id="darkToggle" /> Dark mode</label>
+      </div>
+    </header>
 
-<div class="box">
-<h2>📊 Excel Intake Dashboard</h2>
+    <!-- File & sheet -->
+    <div class="card">
+      <div class="u-row">
+        <input id="fileInput" type="file" accept=".xlsx,.xls" multiple />
+        <button id="loadBtn" class="btn">Load Files</button>
 
-<input type="file" id="excelFile">
+        <label class="small">File:</label>
+        <select id="fileSelect"></select>
 
-<br>
+        <label class="small">Sheet:</label>
+        <select id="sheetSelect"></select>
 
-<label>Filter City:</label>
-<select id="cityFilter"></select>
+        <button id="clearBtn" class="btn ghost">Clear</button>
+      </div>
+      <div style="margin-top:8px" class="small">Tip: upload multiple Excel files; pick file and then sheet.</div>
+    </div>
 
-<label>Filter Type:</label>
-<select id="typeFilter"></select>
+    <!-- Adaptive Filters -->
+    <div style="margin-top:12px" class="card" id="adaptiveControls">
+      <div class="u-row" style="align-items:center;">
+        <div>
+          <label class="small">Numeric metric</label><br/>
+          <select id="numericSelect"><option value="">(none)</option></select>
+        </div>
 
-<label>Select Month:</label>
-<select id="monthFilter"></select>
+        <div>
+          <label class="small">Group by (for Group View)</label><br/>
+          <select id="groupBy"><option value="City">City</option></select>
+        </div>
 
-<div class="summary" id="statsBox"></div>
+        <div>
+          <label class="small">View</label><br/>
+          <select id="viewMode">
+            <option value="month">Month View</option>
+            <option value="group">Group View</option>
+          </select>
+        </div>
 
-<canvas id="chart" height="100"></canvas>
-</div>
+        <div>
+          <label class="small">Month format</label><br/>
+          <select id="monthFormat"><option value="pretty">Jan 2025</option><option value="raw">2025-01</option></select>
+        </div>
+
+        <div style="margin-left:auto">
+          <button id="downloadCsv" class="btn ghost">Download CSV</button>
+        </div>
+      </div>
+
+      <div style="margin-top:10px" id="dynamicFilters" class="u-row small">
+        <!-- dynamic categorical filters will be inserted here -->
+      </div>
+    </div>
+
+    <!-- Grid: Chart + Controls -->
+    <div class="grid">
+      <div>
+        <div class="card" id="chartCard">
+          <div class="row-spread">
+            <h3 style="margin:0">Chart</h3>
+            <div class="small">Rows: <span id="rowCount">0</span></div>
+          </div>
+
+          <div id="chartBox">
+            <canvas id="mainChart"></canvas>
+            <div class="u-row" style="justify-content:space-between;align-items:center">
+              <div id="maxMin" class="statBox">No data</div>
+              <div class="small" id="noteArea"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h4 style="margin:0 0 8px 0">Preview (first 100 rows)</h4>
+          <div id="preview" class="listPreview small">No data</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h4 style="margin:0 0 8px 0">Detected columns</h4>
+          <ul id="colsList" class="small" style="margin:0;padding-left:16px;color:var(--muted)"></ul>
+          <hr style="margin:10px 0" />
+          <div class="small" style="color:var(--muted)">Choose the numeric column to chart. Group-by dropdown is populated with categorical columns (City, Region_Type, Geography, etc.).</div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h4 style="margin:0 0 8px 0">Actions</h4>
+          <button id="resetFilters" class="btn ghost">Reset Filters</button>
+          <div style="height:8px"></div>
+          <button id="exampleBtn" class="btn">Load Example Multi-sheet</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
 
 <script>
-let rawData = [];
-let chart;
+/* Adaptive dashboard script
+   - Detects column types
+   - Builds categorical filters dynamically
+   - Allows numeric metric selection
+   - Two view modes: Month View and Group View
+*/
 
-document.getElementById("excelFile").addEventListener("change", function(e){
-    let reader = new FileReader();
-    reader.onload = function(evt){
-        let workbook = XLSX.read(evt.target.result, { type: "binary" });
-        rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-        
-        populateFilters();
-        updateChart();
+const fileInput = document.getElementById('fileInput');
+const loadBtn = document.getElementById('loadBtn');
+const fileSelect = document.getElementById('fileSelect');
+const sheetSelect = document.getElementById('sheetSelect');
+const clearBtn = document.getElementById('clearBtn');
+
+const numericSelect = document.getElementById('numericSelect');
+const groupBy = document.getElementById('groupBy');
+const viewMode = document.getElementById('viewMode');
+const monthFormat = document.getElementById('monthFormat');
+const dynamicFilters = document.getElementById('dynamicFilters');
+
+const downloadCsv = document.getElementById('downloadCsv');
+const resetFilters = document.getElementById('resetFilters');
+const exampleBtn = document.getElementById('exampleBtn');
+
+const colsList = document.getElementById('colsList');
+const preview = document.getElementById('preview');
+const rowCount = document.getElementById('rowCount');
+const maxMin = document.getElementById('maxMin');
+const noteArea = document.getElementById('noteArea');
+
+const darkToggle = document.getElementById('darkToggle');
+
+let uploadedFiles = {}; // filename -> { workbook, fileObj }
+let active = { fileName:null, sheetName:null, rows:[], schema:{} }; // schema: {col: type}
+
+let chart = null;
+const ctx = document.getElementById('mainChart').getContext('2d');
+
+/* Utility: normalize header key to canonical */
+function normalizeKey(k){
+  if(!k) return k;
+  const s = String(k).trim();
+  const low = s.toLowerCase().replace(/\s+/g,'_');
+  if(low.includes('month') || low==='month' || low==='date') return 'Month';
+  if(low.includes('city_type') || low.includes('city-type') || low.includes('city_type'.toLowerCase())) return 'City_Type';
+  if(low === 'city' || low.includes('city')) return 'City';
+  if(low.includes('revenue') || low.includes('profit') || low.includes('enroll') || low.includes('cac') || low.includes('ltv') || low.includes('cost') || low.includes('placement') || low.includes('engagement')) return s;
+  return s;
+}
+
+/* detect column types: numeric, categorical, date-like */
+function detectSchema(rows){
+  const schema = {};
+  if(!rows || rows.length === 0) return schema;
+  const cols = Object.keys(rows[0]);
+  cols.forEach(c => {
+    let numericCount = 0, nonEmptyCount = 0, dateCount = 0;
+    for(let i=0;i<Math.min(50, rows.length); i++){
+      const v = rows[i][c];
+      if(v === null || v === undefined || String(v).trim()==='') continue;
+      nonEmptyCount++;
+      const n = Number(String(v).toString().replace(/,/g,''));
+      if(!isNaN(n)) numericCount++;
+      // datelike detection
+      const parsedDate = Date.parse(String(v));
+      if(!isNaN(parsedDate)) dateCount++;
+      // also detect YYYY-MM like
+      if(/^\d{4}[-\/]\d{1,2}/.test(String(v).trim())) dateCount++;
     }
-    reader.readAsBinaryString(e.target.files[0]);
+    let type = 'categorical';
+    if(nonEmptyCount > 0 && numericCount / nonEmptyCount >= 0.6) type = 'numeric';
+    else if(nonEmptyCount>0 && dateCount / nonEmptyCount >= 0.5) type = 'date';
+    schema[c] = type;
+  });
+  return schema;
+}
+
+/* parse file(s) */
+loadBtn.addEventListener('click', async ()=>{
+  const files = fileInput.files;
+  if(!files || files.length===0){ alert('choose files first'); return; }
+  for(const f of files){
+    const ab = await f.arrayBuffer();
+    const data = new Uint8Array(ab);
+    const wb = XLSX.read(data, {type:'array'});
+    uploadedFiles[f.name] = { workbook: wb, fileObj: f };
+  }
+  populateFileSelect();
+  alert('Loaded ' + Object.keys(uploadedFiles).length + ' file(s).');
 });
 
-function populateFilters(){
-    let cities = [...new Set(rawData.map(r=>r.City))];
-    let types = [...new Set(rawData.map(r=>r.City_Type))];
-    let months = [...new Set(rawData.map(r=>r.Month))];
-
-    let citySelect = document.getElementById("cityFilter");
-    let typeSelect = document.getElementById("typeFilter");
-    let monthSelect = document.getElementById("monthFilter");
-
-    citySelect.innerHTML = `<option value="all">All</option>` + cities.map(c=>`<option>${c}</option>`).join("");
-    typeSelect.innerHTML = `<option value="all">All</option>` + types.map(t=>`<option>${t}</option>`).join("");
-    monthSelect.innerHTML = months.map(m=>`<option>${m}</option>`).join("");
-
-    citySelect.onchange = updateChart;
-    typeSelect.onchange = updateChart;
-    monthSelect.onchange = updateChart;
+/* populate file select */
+function populateFileSelect(){
+  fileSelect.innerHTML = '';
+  const names = Object.keys(uploadedFiles);
+  if(names.length===0){ fileSelect.innerHTML = '<option value="">(no files)</option>'; sheetSelect.innerHTML = '<option>(no sheets)</option>'; return; }
+  names.forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; fileSelect.appendChild(o); });
+  fileSelect.value = names[0];
+  onFileChange();
 }
 
-function updateChart(){
-    let selectedCity = document.getElementById("cityFilter").value;
-    let selectedType = document.getElementById("typeFilter").value;
-    let selectedMonth = document.getElementById("monthFilter").value;
+fileSelect.addEventListener('change', onFileChange);
+function onFileChange(){
+  const f = fileSelect.value;
+  if(!f) return;
+  const wb = uploadedFiles[f].workbook;
+  sheetSelect.innerHTML = '';
+  wb.SheetNames.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sheetSelect.appendChild(o); });
+  sheetSelect.value = wb.SheetNames[0];
+  active.fileName = f;
+  active.sheetName = sheetSelect.value;
+  loadActiveSheet();
+}
 
-    let filtered = rawData.filter(r => 
-        (selectedCity === "all" || r.City === selectedCity) &&
-        (selectedType === "all" || r.City_Type === selectedType) &&
-        r.Month === selectedMonth
-    );
+sheetSelect.addEventListener('change', ()=>{
+  active.sheetName = sheetSelect.value;
+  loadActiveSheet();
+});
 
-    let labels = filtered.map(r=>r.City);
-    let values = filtered.map(r=>r.Projected_Enrollments);
+/* load active sheet into active.rows */
+function loadActiveSheet(){
+  if(!active.fileName || !active.sheetName) return;
+  const wb = uploadedFiles[active.fileName].workbook;
+  const ws = wb.Sheets[active.sheetName];
+  let raw = XLSX.utils.sheet_to_json(ws, {defval: ''});
+  // Normalize column keys: keep original keys but map display names in UI
+  // We'll not aggressively rename; we keep headers as-is but detect types
+  active.rows = raw;
+  active.schema = detectSchema(raw);
+  renderSchemaAndControls();
+  updateAll();
+}
 
-    if(chart) chart.destroy();
+/* build UI based on detected schema */
+function renderSchemaAndControls(){
+  colsList.innerHTML = '';
+  const sample = active.rows[0] || {};
+  const cols = Object.keys(sample);
+  cols.forEach(c => {
+    const li = document.createElement('li'); li.textContent = `${c} (${active.schema[c] || 'unknown'})`; colsList.appendChild(li);
+  });
 
-    chart = new Chart(document.getElementById("chart"),{
-        type:"bar",
-        data:{
-            labels:labels,
-            datasets:[{label:`Enrollments (${selectedMonth})`,data:values}]
-        }
+  // populate numericSelect with numeric columns
+  numericSelect.innerHTML = '<option value="">(choose numeric)</option>';
+  Object.keys(active.schema).forEach(c => {
+    if(active.schema[c] === 'numeric') {
+      const o = document.createElement('option'); o.value = c; o.textContent = c; numericSelect.appendChild(o);
+    }
+  });
+
+  // populate groupBy with categorical columns
+  groupBy.innerHTML = '<option value="">(choose group column)</option>';
+  Object.keys(active.schema).forEach(c => {
+    if(active.schema[c] === 'categorical' || active.schema[c] === 'date') {
+      const o = document.createElement('option'); o.value = c; o.textContent = c; groupBy.appendChild(o);
+    }
+  });
+
+  // build dynamic categorical filters (for each categorical column, except the chosen group column maybe)
+  buildDynamicFilters();
+}
+
+/* create filter dropdowns for categorical columns */
+function buildDynamicFilters(){
+  dynamicFilters.innerHTML = '';
+  const cols = Object.keys(active.schema || {});
+  cols.forEach(c => {
+    if(active.schema[c] === 'categorical' || active.schema[c] === 'date'){
+      const wrapper = document.createElement('div');
+      wrapper.style.minWidth = '160px';
+      const label = document.createElement('div'); label.className = 'small'; label.textContent = c;
+      const sel = document.createElement('select'); sel.dataset.col = c;
+      sel.innerHTML = '<option value="all">All</option>';
+      // populate unique values
+      const vals = Array.from(new Set(active.rows.map(r=> String(r[c] ?? '').trim()).filter(x=>x!==''))).sort();
+      vals.forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); });
+      sel.addEventListener('change', updateAll);
+      wrapper.appendChild(label); wrapper.appendChild(sel);
+      dynamicFilters.appendChild(wrapper);
+    }
+  });
+}
+
+/* get active filters from dynamicFilters */
+function getActiveFilters(){
+  const selects = Array.from(dynamicFilters.querySelectorAll('select'));
+  const filters = {};
+  selects.forEach(s => {
+    const col = s.dataset.col;
+    const val = s.value;
+    if(val && val !== 'all') filters[col] = val;
+  });
+  return filters;
+}
+
+/* main update when filters, metric, view change */
+numericSelect.addEventListener('change', updateAll);
+groupBy.addEventListener('change', updateAll);
+viewMode.addEventListener('change', updateAll);
+monthFormat.addEventListener('change', updateAll);
+
+/* updateAll: filter rows, build chart and preview */
+function updateAll(){
+  const rows = active.rows || [];
+  const filters = getActiveFilters();
+  const filtered = rows.filter(r => {
+    for(const k in filters){
+      if(String(r[k] ?? '').trim() !== String(filters[k]).trim()) return false;
+    }
+    return true;
+  });
+  rowCount.textContent = filtered.length;
+  renderPreview(filtered);
+
+  const metric = numericSelect.value;
+  if(!metric){
+    noteArea.textContent = 'Choose a numeric metric to plot';
+    if(chart){ chart.destroy(); chart = null; }
+    maxMin.innerHTML = 'No metric selected';
+    return;
+  }
+  noteArea.textContent = '';
+
+  if(viewMode.value === 'month'){
+    // if sheet has a Month-like column, group by month; else notify
+    const monthCol = Object.keys(active.schema).find(k => (k.toLowerCase()==='month' || active.schema[k] === 'date'));
+    if(!monthCol){
+      // fallback: group by index (no month)
+      maxMin.innerHTML = 'No Month column detected; Month View not available for this sheet.';
+      // Instead show grouped by groupBy or by row index
+      const grp = groupBy.value || null;
+      if(grp){
+        const byGroup = aggregateByKey(filtered, grp, metric);
+        renderChart(Object.keys(byGroup), Object.values(byGroup), `${metric} by ${grp}`, 'bar', true);
+        showMaxMin(byGroup, `Overall (grouped by ${grp})`);
+      } else {
+        // show total sum as single bar
+        const total = sumColumn(filtered, metric);
+        renderChart([metric], [total], `Total ${metric}`, 'bar', false);
+        maxMin.innerHTML = `Total ${metric}: ${total}`;
+      }
+      return;
+    }
+    // group by month
+    const byMonth = {};
+    filtered.forEach(r => {
+      const key = String(r[monthCol] ?? '').trim();
+      const num = Number(String(r[metric] ?? '')) || 0;
+      byMonth[key] = (byMonth[key] || 0) + num;
     });
+    const months = Object.keys(byMonth).sort((a,b)=>parseMonthKey(a)-parseMonthKey(b));
+    const labels = months.map(m => formatMonthLabel(m));
+    const data = months.map(m => byMonth[m]);
+    renderChart(labels, data, `${metric} (by month)`, 'line', false);
+    // if a particular month is selected in dynamic filters, show per-category max/min for that month
+    const filtersKeys = Object.keys(getActiveFilters());
+    // if user selected a month filter explicitly, show per-group max/min for that month
+    const monthFilterSel = findMonthFilterName();
+    if(monthFilterSel){
+      // filter rows to that month and compute per-group metric
+      const grp = groupBy.value;
+      if(grp){
+        const rowsForMonth = filtered.filter(r => String(r[monthFilterSel.col] ?? '').trim() === monthFilterSel.val);
+        const byGroup = aggregateByKey(rowsForMonth, grp, metric);
+        showMaxMin(byGroup, monthFilterSel.val);
+      } else {
+        maxMin.innerHTML = `Select a Group column to see max/min per group for ${formatMonthLabel(monthFilterSel.val)}`;
+      }
+    } else {
+      maxMin.innerHTML = 'No month filter selected — select a month filter to see max/min per group for that month.';
+    }
 
-    let maxVal = Math.max(...values);
-    let minVal = Math.min(...values);
-
-    document.getElementById("statsBox").innerHTML = `
-        🔹 <b>Highest:</b> ${filtered[values.indexOf(maxVal)].City} → ${maxVal}<br>
-        🔹 <b>Lowest:</b> ${filtered[values.indexOf(minVal)].City} → ${minVal}
-    `;
+  } else {
+    // Group view: aggregate by chosen group column (or fallback to first categorical)
+    const grp = groupBy.value || Object.keys(active.schema).find(k => active.schema[k] === 'categorical');
+    if(!grp){
+      maxMin.innerHTML = 'No categorical column to group by; choose group column.';
+      if(chart){ chart.destroy(); chart = null; }
+      return;
+    }
+    const byGroup = aggregateByKey(filtered, grp, metric);
+    // sort descending
+    const entries = Object.entries(byGroup).sort((a,b)=>b[1]-a[1]);
+    const labels = entries.map(e=>e[0]);
+    const data = entries.map(e=>e[1]);
+    renderChart(labels, data, `${metric} by ${grp}`, 'bar', true);
+    showMaxMin(byGroup, 'Overall (filtered)');
+  }
 }
-</script>
 
+/* find if any dynamic filter corresponds to a month-like column and has a non-all selection */
+function findMonthFilterName(){
+  // dynamicFilters has selects with dataset.col - we didn't set dataset.col; instead, dynamic filters were created with select.dataset.col earlier
+  const selects = Array.from(dynamicFilters.querySelectorAll('select'));
+  for(const s of selects){
+    const col = s.dataset.col;
+    const val = s.value;
+    if(!val || val === 'all') continue;
+    // detect if column is a month-like column
+    if(active.schema[col] === 'date' || col.toLowerCase().includes('month')){
+      return {col, val};
+    }
+  }
+  return null;
+}
+
+/* helper aggregate by key for numeric metric */
+function aggregateByKey(rows, key, metric){
+  const out = {};
+  rows.forEach(r => {
+    const k = String(r[key] ?? 'Unknown');
+    const v = Number(String(r[metric] ?? '')) || 0;
+    out[k] = (out[k] || 0) + v;
+  });
+  return out;
+}
+function sumColumn(rows, metric){ return rows.reduce((s,r)=> s + (Number(String(r[metric] ?? '')) || 0), 0); }
+
+/* parse month-like keys to timestamp for sorting */
+function parseMonthKey(s){
+  if(!s) return 0;
+  const t = String(s).trim();
+  const m = t.match(/^(\d{4})[-\/](\d{1,2})/);
+  if(m){ const y = parseInt(m[1],10), mo = parseInt(m[2],10); return Date.UTC(y, mo-1, 1); }
+  const p = Date.parse(t);
+  if(!isNaN(p)) return p;
+  return 0;
+}
+function formatMonthLabel(raw){
+  if(!raw) return raw;
+  if(monthFormat.value === 'raw') return raw;
+  const t = parseMonthKey(raw);
+  if(t>0){ const d = new Date(t); const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return `${monthNames[d.getUTCMonth()]} ${d.getUTCFullYear()}`; }
+  // fallback try parse
+  const p = Date.parse(String(raw));
+  if(!isNaN(p)){ const d = new Date(p); const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return `${monthNames[d.getMonth()]} ${d.getFullYear()}`; }
+  return raw;
+}
+
+/* render Chart.js */
+function renderChart(labels, data, label, type='bar', horizontal=false){
+  const isDark = document.body.classList.contains('dark');
+  const textColor = getComputedStyle(document.body).getPropertyValue('--text') || (isDark ? '#e6eef8' : '#0f1724');
+
+  if(chart) chart.destroy();
+  const cfg = {
+    type: type,
+    data: { labels, datasets:[{ label, data, backgroundColor: isDark ? 'rgba(96,165,250,0.9)' : 'rgba(37,99,235,0.9)', borderRadius:6 }] },
+    options: {
+      indexAxis: horizontal ? 'y' : 'x',
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false, labels:{color:textColor}}, tooltip:{enabled:true} },
+      scales:{ x:{ ticks:{color:textColor}, grid:{color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,36,0.04)'} }, y:{ ticks:{color:textColor}, grid:{color: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,36,0.04)'} } }
+    }
+  };
+  chart = new Chart(ctx, cfg);
+}
+
+/* show max and min for per-group mapping */
+function showMaxMin(mapObj, label){
+  const entries = Object.entries(mapObj || {});
+  if(entries.length === 0){ maxMin.innerHTML = `No data for ${label}`; return; }
+  entries.sort((a,b)=>b[1]-a[1]);
+  const max = entries[0], min = entries[entries.length-1];
+  maxMin.innerHTML = `<b>${label}</b><br>Max: ${max[0]} → ${max[1]}<br>Min: ${min[0]} → ${min[1]}`;
+}
+
+/* preview first 100 rows */
+function renderPreview(rows){
+  if(!rows || rows.length===0){ preview.innerHTML = '<i class="small">No rows</i>'; return; }
+  const cols = Array.from(new Set(rows.flatMap(r => Object.keys(r))));
+  const first = rows.slice(0,100);
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>';
+  cols.forEach(c => html += `<th style="text-align:left;padding:6px;border-bottom:1px solid rgba(0,0,0,0.06)">${c}</th>`);
+  html += '</tr></thead><tbody>';
+  first.forEach(r => { html += '<tr>'; cols.forEach(c => html += `<td style="padding:6px;border-bottom:1px solid rgba(0,0,0,0.04)">${String(r[c] ?? '')}</td>`); html += '</tr>'; });
+  html += '</tbody></table>';
+  preview.innerHTML = html;
+}
+
+/* CSV export of the currently filtered rows */
+downloadCsv.addEventListener('click', ()=>{
+  const rows = getFilteredRowsForExport();
+  if(rows.length===0){ alert('No rows to download'); return; }
+  const cols = Array.from(new Set(rows.flatMap(r => Object.keys(r))));
+  const lines = [cols.join(',')];
+  rows.forEach(r => {
+    const line = cols.map(c => `"${String(r[c] ?? '').replace(/"/g,'""')}"`).join(',');
+    lines.push(line);
+  });
+  const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'filtered.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+});
+
+function getFilteredRowsForExport(){
+  const rows = active.rows || [];
+  const filters = getActiveFilters();
+  return rows.filter(r => {
+    for(const k in filters){
+      if(String(r[k] ?? '').trim() !== String(filters[k]).trim()) return false;
+    }
+    return true;
+  });
+}
+
+/* get active filters (dynamic selects) */
+function getActiveFilters(){
+  const selects = Array.from(dynamicFilters.querySelectorAll('select'));
+  const out = {};
+  selects.forEach(s => {
+    const col = s.dataset.col;
+    const val = s.value;
+    if(val && val !== 'all') out[col] = val;
+  });
+  return out;
+}
+
+/* attach dataset.col when building dynamic filters earlier - ensure we set dataset.col */
+function attachDatasetColToDynamicFilters(){
+  const selects = Array.from(dynamicFilters.querySelectorAll('select'));
+  selects.forEach(s => {
+    if(!s.dataset.col){
+      const label = s.previousSibling ? s.previousSibling.textContent : null;
+      if(label) s.dataset.col = label;
+    }
+  });
+}
+
+/* clear everything */
+clearBtn.addEventListener('click', ()=>{
+  uploadedFiles = {}; active = { fileName:null, sheetName:null, rows:[], schema:{} };
+  fileInput.value = ''; fileSelect.innerHTML = ''; sheetSelect.innerHTML = '';
+  numericSelect.innerHTML = '<option>(none)</option>'; groupBy.innerHTML = '<option>(none)</option>';
+  dynamicFilters.innerHTML = ''; preview.innerHTML = 'No data'; colsList.innerHTML = '';
+  if(chart){ chart.destroy(); chart = null; }
+  maxMin.innerHTML = 'No data';
+  rowCount.textContent = '0';
+});
+
+/* reset filters */
+resetFilters.addEventListener('click', ()=>{
+  const selects = Array.from(dynamicFilters.querySelectorAll('select'));
+  selects.forEach(s => s.value = 'all');
+  numericSelect.value = '';
+  groupBy.value = '';
+  viewMode.value = 'month';
+  updateAll();
+});
+
+/* example dataset loading (multi-sheet) */
+exampleBtn.addEventListener('click', ()=>{
+  // build an in-memory workbook similar to the user's multi-sheet structure
+  const wb = XLSX.utils.book_new();
+
+  // sheet1 - enrollments
+  const enroll = [
+    ['Month','City','City_Type','Projected_Enrollments'],
+    ['2025-01','Mumbai','Metro',506],
+    ['2025-01','Bangalore','Metro',574],
+    ['2025-01','Delhi','Metro',566],
+    ['2025-02','Mumbai','Metro',600],
+    ['2025-02','Bangalore','Metro',620],
+    ['2025-02','Delhi','Metro',610]
+  ];
+  const ws1 = XLSX.utils.aoa_to_sheet(enroll); XLSX.utils.book_append_sheet(wb, ws1, 'Enrollments');
+
+  // sheet2 - revenue
+  const revenue = [
+    ['Month','Region_Type','Scenario','Revenue_Lakh','Operating_Cost_Lakh','Profit_Lakh'],
+    ['2025-01','Metro','Base',138,47,91],
+    ['2025-01','Metro','Aggressive',98,119,-21],
+    ['2025-01','Metro','Conservative',195,117,78],
+    ['2025-01','Tier2','Base',153,44,109],
+    ['2025-01','Tier2','Aggressive',178,109,69],
+  ];
+  const ws2 = XLSX.utils.aoa_to_sheet(revenue); XLSX.utils.book_append_sheet(wb, ws2, 'Revenue');
+
+  // sheet3 - market share
+  const ms = [
+    ['Geography','City_Type','Segment','Our_Market_Share_Pct','Competitor_A_Pct','Competitor_B_Pct','Win_Rate_Pct'],
+    ['Mumbai','Metro','B2C',25,20,27,63],
+    ['Mumbai','Metro','B2B',45,20,10,47],
+    ['Bangalore','Metro','B2C',39,40,20,46],
+    ['Bangalore','Metro','B2B',41,28,26,45],
+  ];
+  const ws3 = XLSX.utils.aoa_to_sheet(ms); XLSX.utils.book_append_sheet(wb, ws3, 'MarketShare');
+
+  // append sheet4, sheet5, sheet6 similarly for demo...
+  const key = 'EXAMPLE_WORKBOOK';
+  uploadedFiles[key] = { workbook: wb, fileObj: null };
+  populateFileSelect();
+  fileSelect.value = key; onFileChange();
+});
+
+/* dark mode toggle */
+darkToggle.addEventListener('change', ()=>{
+  if(darkToggle.checked) document.body.classList.add('dark'); else document.body.classList.remove('dark');
+  updateAll();
+});
+
+/* small helper: after dynamic filters created, set dataset.col properly */
+// modify buildDynamicFilters to set dataset.col - but it's already set there
+// ensure dynamic filters respond to change
+dynamicFilters.addEventListener('change', updateAll);
+
+/* initial setup - empty state */
+fileSelect.innerHTML = ''; sheetSelect.innerHTML = '';
+</script>
 </body>
 </html>
