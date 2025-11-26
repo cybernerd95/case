@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Excel Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+ body { font-family: Arial; padding:20px; background:#f4f4f4; }
+ .box { background:white; padding:20px; border-radius:10px; width:90%; margin:auto; }
+ select,input { padding:10px; margin:10px; }
+ .summary{ background:#eef; padding:10px; margin-top:10px; }
+</style>
+</head>
+<body>
+
+<div class="box">
+<h2>📊 Excel Intake Dashboard</h2>
+
+<input type="file" id="excelFile">
+
+<br>
+
+<label>Filter City:</label>
+<select id="cityFilter"></select>
+
+<label>Filter Type:</label>
+<select id="typeFilter"></select>
+
+<label>Select Month:</label>
+<select id="monthFilter"></select>
+
+<div class="summary" id="statsBox"></div>
+
+<canvas id="chart" height="100"></canvas>
+</div>
+
+<script>
+let rawData = [];
+let chart;
+
+document.getElementById("excelFile").addEventListener("change", function(e){
+    let reader = new FileReader();
+    reader.onload = function(evt){
+        let workbook = XLSX.read(evt.target.result, { type: "binary" });
+        rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+        
+        populateFilters();
+        updateChart();
+    }
+    reader.readAsBinaryString(e.target.files[0]);
+});
+
+function populateFilters(){
+    let cities = [...new Set(rawData.map(r=>r.City))];
+    let types = [...new Set(rawData.map(r=>r.City_Type))];
+    let months = [...new Set(rawData.map(r=>r.Month))];
+
+    let citySelect = document.getElementById("cityFilter");
+    let typeSelect = document.getElementById("typeFilter");
+    let monthSelect = document.getElementById("monthFilter");
+
+    citySelect.innerHTML = `<option value="all">All</option>` + cities.map(c=>`<option>${c}</option>`).join("");
+    typeSelect.innerHTML = `<option value="all">All</option>` + types.map(t=>`<option>${t}</option>`).join("");
+    monthSelect.innerHTML = months.map(m=>`<option>${m}</option>`).join("");
+
+    citySelect.onchange = updateChart;
+    typeSelect.onchange = updateChart;
+    monthSelect.onchange = updateChart;
+}
+
+function updateChart(){
+    let selectedCity = document.getElementById("cityFilter").value;
+    let selectedType = document.getElementById("typeFilter").value;
+    let selectedMonth = document.getElementById("monthFilter").value;
+
+    let filtered = rawData.filter(r => 
+        (selectedCity === "all" || r.City === selectedCity) &&
+        (selectedType === "all" || r.City_Type === selectedType) &&
+        r.Month === selectedMonth
+    );
+
+    let labels = filtered.map(r=>r.City);
+    let values = filtered.map(r=>r.Projected_Enrollments);
+
+    if(chart) chart.destroy();
+
+    chart = new Chart(document.getElementById("chart"),{
+        type:"bar",
+        data:{
+            labels:labels,
+            datasets:[{label:`Enrollments (${selectedMonth})`,data:values}]
+        }
+    });
+
+    let maxVal = Math.max(...values);
+    let minVal = Math.min(...values);
+
+    document.getElementById("statsBox").innerHTML = `
+        🔹 <b>Highest:</b> ${filtered[values.indexOf(maxVal)].City} → ${maxVal}<br>
+        🔹 <b>Lowest:</b> ${filtered[values.indexOf(minVal)].City} → ${minVal}
+    `;
+}
+</script>
+
+</body>
+</html>
